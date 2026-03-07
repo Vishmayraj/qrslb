@@ -1,4 +1,5 @@
 import asyncio
+import time
 import os
 import re
 from contextlib import asynccontextmanager
@@ -9,8 +10,10 @@ from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend import session_manager as sm
-from backend.signaling import handle_websocket
+import session_manager as sm
+
+_start_time = time.time()  # recorded at boot
+from signaling import handle_websocket
 
 
 # ---------------------------------------------------------------------------
@@ -169,4 +172,12 @@ async def websocket_endpoint(ws: WebSocket, session_id: str, role: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "sessions_active": len(sm._sessions)}
+    now = time.time()
+    sessions = list(sm._sessions.values())
+    return JSONResponse({
+        "status":           "ok",
+        "sessions_active":  len(sessions),
+        "sessions_waiting": sum(1 for s in sessions if s["state"] == sm.State.WAITING),
+        "sessions_paired":  sum(1 for s in sessions if s["state"] == sm.State.PAIRED),
+        "uptime_seconds":   round(now - _start_time),
+    })
