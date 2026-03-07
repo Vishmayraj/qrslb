@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QR Link Bridge</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg:        #0a0a0a;
+    --surface:   #111111;
+    --border:    #222222;
+    --accent:    #c8f135;
+    --accent-dim:#8aaa1f;
+    --text:      #f0f0f0;
+    --muted:     #555555;
+    --danger:    #ff4444;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  /* ── background grid ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  /* ── corner accent ── */
+  body::after {
+    content: '';
+    position: fixed;
+    top: -120px; right: -120px;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, #c8f13520 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* ── card ── */
+  .card {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 48px 56px;
+    width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* corner brackets */
+  .card::before, .card::after {
+    content: '';
+    position: absolute;
+    width: 16px; height: 16px;
+    border-color: var(--accent);
+    border-style: solid;
+  }
+  .card::before { top: -1px; left: -1px;  border-width: 2px 0 0 2px; }
+  .card::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+
+  /* ── header ── */
+  .header {
+    text-align: center;
+    width: 100%;
+  }
+
+  .logo {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  h1 {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  h1 span { color: var(--accent); }
+
+  /* ── QR wrapper ── */
+  .qr-wrap {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* corner marks on QR */
+  .qr-wrap::before, .qr-wrap::after,
+  .qr-wrap .br, .qr-wrap .bl {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+    border-color: var(--accent);
+    border-style: solid;
+    z-index: 2;
+  }
+  .qr-wrap::before { top: 0;    left: 0;   border-width: 2px 0 0 2px; }
+  .qr-wrap::after  { top: 0;    right: 0;  border-width: 2px 2px 0 0; }
+  .qr-wrap .br     { bottom: 0; right: 0;  border-width: 0 2px 2px 0; }
+  .qr-wrap .bl     { bottom: 0; left: 0;   border-width: 0 0 2px 2px; }
+
+  #qrcode {
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  #qrcode canvas,
+  #qrcode img {
+    display: block;
+    border-radius: 2px;
+  }
+
+  /* ── status bar ── */
+  .status-bar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+    transition: background 0.4s;
+  }
+
+  .dot.waiting  { background: var(--accent); animation: pulse 1.5s infinite; }
+  .dot.paired   { background: #4fc3f7; animation: pulse 1.5s infinite; }
+  .dot.done     { background: var(--accent); animation: none; }
+  .dot.error    { background: var(--danger); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+
+  .status-text {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    transition: color 0.4s;
+  }
+
+  .status-text.active { color: var(--text); }
+
+  /* ── timer ── */
+  .timer {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+  }
+
+  .timer span { color: var(--accent-dim); }
+
+  /* ── success overlay ── */
+  .success {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    text-align: center;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  .success.show { display: flex; }
+
+  .checkmark {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+  }
+
+  .success h2 {
+    font-size: 20px;
+    font-weight: 800;
+  }
+
+  .success p {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .reset-btn {
+    margin-top: 8px;
+    padding: 10px 28px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .reset-btn:hover {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  /* ── loading spinner (initial) ── */
+  .spinner {
+    width: 32px; height: 32px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <!-- corner decorations for QR -->
+  <div class="header">
+    <div class="logo">QR Link Bridge</div>
+    <h1>Send a link<br>to <span>this screen</span></h1>
+  </div>
+
+  <!-- QR view -->
+  <div id="qr-view" style="display:flex;flex-direction:column;align-items:center;gap:24px;width:100%">
+
+    <div class="qr-wrap">
+      <div class="br"></div><div class="bl"></div>
+      <div class="spinner" id="spinner"></div>
+      <div id="qrcode" class="hidden"></div>
+    </div>
+
+    <div class="status-bar">
+      <div class="dot" id="dot"></div>
+      <div class="status-text" id="status-text">Initialising session…</div>
+    </div>
+
+    <div class="timer" id="timer"></div>
+
+  </div>
+
+  <!-- success view -->
+  <div class="success" id="success-view">
+    <div class="checkmark">✓</div>
+    <h2>Link opened.</h2>
+    <p id="opened-url" style="word-break:break-all;max-width:280px;color:#888"></p>
+    <button class="reset-btn" onclick="resetSession()">New session ↗</button>
+  </div>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BASE_URL = window.location.origin;
+const WS_BASE  = BASE_URL.replace(/^http/, 'ws');
+const ICE_CONFIG = {
+  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sessionId  = null;
+let ws         = null;
+let pc         = null;          // RTCPeerConnection
+let timerEl    = document.getElementById('timer');
+let expiryTime = null;
+let timerInterval = null;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function setStatus(text, state = '') {
+  const dot  = document.getElementById('dot');
+  const label = document.getElementById('status-text');
+  dot.className   = 'dot ' + state;
+  label.className = 'status-text' + (state ? ' active' : '');
+  label.textContent = text;
+}
+
+function startTimer(expiresIn) {
+  expiryTime = Date.now() + expiresIn * 1000;
+  timerInterval = setInterval(() => {
+    const left = Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
+    const m = String(Math.floor(left / 60)).padStart(2, '0');
+    const s = String(left % 60).padStart(2, '0');
+    timerEl.innerHTML = `Session expires in <span>${m}:${s}</span>`;
+    if (left === 0) {
+      clearInterval(timerInterval);
+      setStatus('Session expired', 'error');
+      timerEl.textContent = '';
+    }
+  }, 1000);
+}
+
+function showQR(url) {
+  document.getElementById('spinner').classList.add('hidden');
+  const qrDiv = document.getElementById('qrcode');
+  qrDiv.classList.remove('hidden');
+  qrDiv.innerHTML = '';
+  new QRCode(qrDiv, {
+    text:          url,
+    width:         200,
+    height:        200,
+    colorDark:     '#0a0a0a',
+    colorLight:    '#f0f0f0',
+    correctLevel:  QRCode.CorrectLevel.H,
+  });
+}
+
+function showSuccess(url) {
+  document.getElementById('qr-view').style.display    = 'none';
+  const sv = document.getElementById('success-view');
+  sv.classList.add('show');
+  document.getElementById('opened-url').textContent = url;
+  clearInterval(timerInterval);
+  timerEl.textContent = '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WebRTC
+// ─────────────────────────────────────────────────────────────────────────────
+
+function createPeerConnection() {
+  pc = new RTCPeerConnection(ICE_CONFIG);
+
+  // DataChannel — desktop creates it, waits for phone to use it
+  const dc = pc.createDataChannel('link');
+
+  dc.onopen = () => {
+    setStatus('Connected — waiting for link…', 'waiting');
+  };
+
+  dc.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'link' && /^https?:\/\//i.test(msg.url)) {
+        // Send ack back through DataChannel
+        dc.send(JSON.stringify({ type: 'ack' }));
+        // Tell signaling server we're done
+        wsSend({ type: 'done' });
+        // Open the link
+        window.open(msg.url, '_blank');
+        showSuccess(msg.url);
+      }
+    } catch (_) {}
+  };
+
+  // Send ICE candidates through signaling server
+  pc.onicecandidate = ({ candidate }) => {
+    if (candidate) wsSend({ type: 'ice', candidate: candidate.toJSON() });
+  };
+
+  return pc;
+}
+
+async function startOffer() {
+  createPeerConnection();
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  wsSend({ type: 'offer', sdp: { type: offer.type, sdp: offer.sdp } });
+}
+
+async function handleAnswer(sdp) {
+  await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+}
+
+async function handleIce(candidate) {
+  try {
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+  } catch (_) {}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WebSocket signaling
+// ─────────────────────────────────────────────────────────────────────────────
+
+function wsSend(payload) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload));
+  }
+}
+
+function connectWS() {
+  ws = new WebSocket(`${WS_BASE}/ws/${sessionId}/desktop`);
+
+  ws.onopen = () => {
+    wsSend({ type: 'ready' });
+    setStatus('Scan QR with your phone', 'waiting');
+  };
+
+  ws.onmessage = async (e) => {
+    const msg = JSON.parse(e.data);
+
+    switch (msg.type) {
+      case 'peer_joined':
+        setStatus('Phone connected — establishing link…', 'paired');
+        await startOffer();
+        break;
+      case 'answer':
+        await handleAnswer(msg.sdp);
+        break;
+      case 'ice':
+        await handleIce(msg.candidate);
+        break;
+      case 'peer_left':
+        setStatus('Phone disconnected', 'error');
+        break;
+      case 'done':
+        ws.close();
+        break;
+      case 'error':
+        setStatus(`Error: ${msg.message}`, 'error');
+        break;
+    }
+  };
+
+  ws.onclose = () => {
+    // Only show disconnected if not already in success state
+    if (!document.getElementById('success-view').classList.contains('show')) {
+      setStatus('Disconnected', 'error');
+    }
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session bootstrap
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function initSession() {
+  try {
+    const res  = await fetch('/session', { method: 'POST' });
+    const data = await res.json();
+
+    sessionId = data.session_id;
+
+    // Build full URL for QR
+    const qrUrl = `${BASE_URL}${data.qr_payload}`;
+
+    showQR(qrUrl);
+    startTimer(data.expires_in);
+    connectWS();
+
+  } catch (err) {
+    setStatus('Failed to create session', 'error');
+    console.error(err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reset
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resetSession() {
+  // Clean up old connection
+  if (ws)  { ws.close(); ws = null; }
+  if (pc)  { pc.close(); pc = null; }
+  clearInterval(timerInterval);
+
+  // Reset UI
+  document.getElementById('success-view').classList.remove('show');
+  const qrView = document.getElementById('qr-view');
+  qrView.style.display = 'flex';
+  document.getElementById('spinner').classList.remove('hidden');
+  document.getElementById('qrcode').classList.add('hidden');
+  setStatus('Initialising session…', '');
+  timerEl.textContent = '';
+
+  // Start fresh
+  initSession();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Boot
+// ─────────────────────────────────────────────────────────────────────────────
+
+initSession();
+</script>
+</body>
+</html>
