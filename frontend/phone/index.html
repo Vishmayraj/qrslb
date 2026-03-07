@@ -326,7 +326,8 @@ const sessionId = new URLSearchParams(window.location.search).get('session');
 
 let ws = null;
 let pc = null;
-let dc = null;   // DataChannel (received from desktop)
+let dc = null;
+let iceCandidateBuffer = [];  // holds ICE that arrives before answer is set
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI helpers
@@ -427,9 +428,18 @@ async function startOffer() {
 
 async function handleAnswer(sdp) {
   await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  // Flush buffered ICE candidates
+  for (const c of iceCandidateBuffer) {
+    try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
+  }
+  iceCandidateBuffer = [];
 }
 
 async function handleIce(candidate) {
+  if (!pc || !pc.remoteDescription) {
+    iceCandidateBuffer.push(candidate);  // buffer until answer arrives
+    return;
+  }
   try {
     if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
   } catch (_) {}

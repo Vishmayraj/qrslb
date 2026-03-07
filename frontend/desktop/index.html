@@ -311,7 +311,8 @@ let ICE_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 let sessionId  = null;
 let ws         = null;
-let pc         = null;          // RTCPeerConnection
+let pc         = null;
+let iceCandidateBuffer = [];   // holds ICE candidates that arrive before remote desc is set
 let timerEl    = document.getElementById('timer');
 let expiryTime = null;
 let timerInterval = null;
@@ -406,12 +407,21 @@ function createPeerConnection() {
 async function handleOffer(sdp) {
   createPeerConnection();
   await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  // Flush any ICE candidates that arrived before the offer
+  for (const c of iceCandidateBuffer) {
+    try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
+  }
+  iceCandidateBuffer = [];
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   wsSend({ type: 'answer', sdp: { type: answer.type, sdp: answer.sdp } });
 }
 
 async function handleIce(candidate) {
+  if (!pc || !pc.remoteDescription) {
+    iceCandidateBuffer.push(candidate);  // buffer until offer is processed
+    return;
+  }
   try {
     await pc.addIceCandidate(new RTCIceCandidate(candidate));
   } catch (_) {}
@@ -439,10 +449,6 @@ function connectWS() {
     const msg = JSON.parse(e.data);
 
     switch (msg.type) {
-      case 'peer_joined':
-        // Phone connected — it will send offer shortly, just update status
-        setStatus('Phone connected — establishing link…', 'paired');
-        break;
       case 'offer':
         // Phone sent offer — desktop answers
         setStatus('Phone connected — establishing link…', 'paired');

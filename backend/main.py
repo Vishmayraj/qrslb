@@ -3,6 +3,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -65,34 +66,43 @@ async def serve_phone():
 
 
 # ---------------------------------------------------------------------------
-# ICE config endpoint — frontend fetches this to get STUN + TURN servers
-# Credentials stay in env vars, never in HTML files
+# ICE config — fetches live TURN credentials from Metered API
+# API key stays in env var, never in HTML
 # ---------------------------------------------------------------------------
+
+FALLBACK_ICE = {
+    "iceServers": [
+        {"urls": "stun:stun.l.google.com:19302"},
+        {"urls": "stun:stun1.l.google.com:19302"},
+    ]
+}
 
 @app.get("/ice-config")
 async def ice_config():
     """
-    Returns WebRTC ICE server config.
-    Falls back to STUN-only if TURN env vars are not set.
+    Fetches fresh TURN credentials from Metered.
+    Falls back to STUN-only if API key is not configured or request fails.
     """
-    ice_servers = [
-        {"urls": "stun:stun.l.google.com:19302"},
-        {"urls": "stun:stun1.l.google.com:19302"},
-    ]
-    
-    # No need of .env cuz it stays in render :)
-    turn_url        = os.getenv("TURN_URL")
-    turn_username   = os.getenv("TURN_USERNAME")
-    turn_credential = os.getenv("TURN_CREDENTIAL")
+    api_key = os.getenv("METERED_API_KEY")
 
-    if turn_url and turn_username and turn_credential:
-        ice_servers.append({
-            "urls":       turn_url,
-            "username":   turn_username,
-            "credential": turn_credential,
-        })
+    if not api_key:
+        return JSONResponse(FALLBACK_ICE)
 
-    return JSONResponse({"iceServers": ice_servers})
+    metered_domain = os.getenv("METERED_DOMAIN", "qrslb.metered.live")
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"https://{metered_domain}/api/v1/turn/credentials",
+                params={"apiKey": api_key},
+            )
+            resp.raise_for_status()
+            ice_servers = resp.json()
+            return JSONResponse({"iceServers": ice_servers})
+
+    except Exception as e:
+        print(f"[ice-config] Metered fetch failed: {e}, falling back to STUN")
+        return JSONResponse(FALLBACK_ICE)
 
 
 # ---------------------------------------------------------------------------

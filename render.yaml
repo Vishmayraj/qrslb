@@ -8,9 +8,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      - key: TURN_URL
-        sync: false
-      - key: TURN_USERNAME
-        sync: false
-      - key: TURN_CREDENTIAL
-        sync: false
+      - key: METERED_API_KEY
+        sync: false        # you paste this manually in Render dashboard
+      - key: METERED_DOMAIN
+        value: qrslb.metered.live
