@@ -1,7 +1,7 @@
 import json
 import time
 from fastapi import WebSocket, WebSocketDisconnect
-import session_manager as sm
+from backend import session_manager as sm
 
 
 # ---------------------------------------------------------------------------
