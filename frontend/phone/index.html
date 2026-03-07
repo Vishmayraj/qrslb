@@ -389,29 +389,25 @@ function sendLink() {
 function createPeerConnection() {
   pc = new RTCPeerConnection(ICE_CONFIG);
 
-  // Desktop opened a DataChannel — receive it here
-  pc.ondatachannel = (e) => {
-    dc = e.channel;
+  // Phone OPENS the DataChannel
+  dc = pc.createDataChannel('link');
 
-    dc.onopen = () => {
-      setStatus('Ready — paste your link', 'ready');
-      enableInput();
-    };
+  dc.onopen = () => {
+    setStatus('Ready — paste your link', 'ready');
+    enableInput();
+  };
 
-    dc.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'ack') {
-          showSuccess();
-        }
-      } catch (_) {}
-    };
+  dc.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'ack') showSuccess();
+    } catch (_) {}
+  };
 
-    dc.onclose = () => {
-      if (!document.getElementById('success-view').classList.contains('show')) {
-        setStatus('Connection closed', 'error');
-      }
-    };
+  dc.onclose = () => {
+    if (!document.getElementById('success-view').classList.contains('show')) {
+      setStatus('Connection closed', 'error');
+    }
   };
 
   // Relay ICE candidates through signaling server
@@ -420,12 +416,15 @@ function createPeerConnection() {
   };
 }
 
-async function handleOffer(sdp) {
+async function startOffer() {
   createPeerConnection();
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  wsSend({ type: 'offer', sdp: { type: offer.type, sdp: offer.sdp } });
+}
+
+async function handleAnswer(sdp) {
   await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  wsSend({ type: 'answer', sdp: { type: answer.type, sdp: answer.sdp } });
 }
 
 async function handleIce(candidate) {
@@ -449,6 +448,9 @@ function connectWS() {
 
   ws.onopen = () => {
     setStatus('Waiting for desktop…', 'connecting');
+    // Tell server this side's message loop is live.
+    // Server will fire peer_joined once both sides have sent ready.
+    wsSend({ type: 'ready' });
   };
 
   ws.onmessage = async (e) => {
@@ -456,10 +458,16 @@ function connectWS() {
 
     switch (msg.type) {
       case 'connected':
-        setStatus('Establishing connection…', 'connecting');
+        setStatus('Waiting for desktop…', 'connecting');
         break;
-      case 'offer':
-        await handleOffer(msg.sdp);
+      case 'peer_joined':
+        // Both sides ready — phone creates offer
+        setStatus('Establishing connection…', 'connecting');
+        await startOffer();
+        break;
+      case 'answer':
+        // Desktop answered — complete handshake
+        await handleAnswer(msg.sdp);
         break;
       case 'ice':
         await handleIce(msg.candidate);

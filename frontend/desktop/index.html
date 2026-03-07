@@ -1,3 +1,5 @@
+<!-- CURR_DIR = frontend/desktop/index.html -->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -374,26 +376,25 @@ function showSuccess(url) {
 function createPeerConnection() {
   pc = new RTCPeerConnection(ICE_CONFIG);
 
-  // DataChannel — desktop creates it, waits for phone to use it
-  const dc = pc.createDataChannel('link');
+  // Desktop RECEIVES the DataChannel opened by phone
+  pc.ondatachannel = (e) => {
+    const dc = e.channel;
 
-  dc.onopen = () => {
-    setStatus('Connected — waiting for link…', 'waiting');
-  };
+    dc.onopen = () => {
+      setStatus('Connected — waiting for link…', 'waiting');
+    };
 
-  dc.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      if (msg.type === 'link' && /^https?:\/\//i.test(msg.url)) {
-        // Send ack back through DataChannel
-        dc.send(JSON.stringify({ type: 'ack' }));
-        // Tell signaling server we're done
-        wsSend({ type: 'done' });
-        // Open the link
-        window.open(msg.url, '_blank');
-        showSuccess(msg.url);
-      }
-    } catch (_) {}
+    dc.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'link' && /^https?:\/\//i.test(msg.url)) {
+          dc.send(JSON.stringify({ type: 'ack' }));
+          wsSend({ type: 'done' });
+          window.open(msg.url, '_blank');
+          showSuccess(msg.url);
+        }
+      } catch (_) {}
+    };
   };
 
   // Send ICE candidates through signaling server
@@ -404,15 +405,12 @@ function createPeerConnection() {
   return pc;
 }
 
-async function startOffer() {
+async function handleOffer(sdp) {
   createPeerConnection();
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  wsSend({ type: 'offer', sdp: { type: offer.type, sdp: offer.sdp } });
-}
-
-async function handleAnswer(sdp) {
   await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  wsSend({ type: 'answer', sdp: { type: answer.type, sdp: answer.sdp } });
 }
 
 async function handleIce(candidate) {
@@ -444,11 +442,13 @@ function connectWS() {
 
     switch (msg.type) {
       case 'peer_joined':
+        // Phone connected — it will send offer shortly, just update status
         setStatus('Phone connected — establishing link…', 'paired');
-        await startOffer();
         break;
-      case 'answer':
-        await handleAnswer(msg.sdp);
+      case 'offer':
+        // Phone sent offer — desktop answers
+        setStatus('Phone connected — establishing link…', 'paired');
+        await handleOffer(msg.sdp);
         break;
       case 'ice':
         await handleIce(msg.candidate);
