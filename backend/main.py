@@ -1,14 +1,26 @@
 import asyncio
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
-from backend import session_manager as sm
-from backend.signaling import handle_websocket
+import session_manager as sm
+from signaling import handle_websocket
+
+
+# ---------------------------------------------------------------------------
+# Session ID validator — must be exactly 8 hex chars, nothing else accepted
+# ---------------------------------------------------------------------------
+
+SESSION_ID_RE = re.compile(r'^[0-9a-f]{8}$')
+
+def _valid_session_id(sid: str) -> bool:
+    return bool(SESSION_ID_RE.match(sid))
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +51,21 @@ app = FastAPI(
     description="Send links from phone to desktop via QR + WebRTC",
     version="1.0.0",
     lifespan=lifespan,
+    # Disable automatic /docs and /redoc in production
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+# CORS — only allow requests from the app's own origin
+# On Render this is your *.onrender.com domain
+ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[ALLOWED_ORIGIN],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 
@@ -67,7 +94,6 @@ async def serve_phone():
 
 # ---------------------------------------------------------------------------
 # ICE config — fetches live TURN credentials from Metered API
-# API key stays in env var, never in HTML
 # ---------------------------------------------------------------------------
 
 FALLBACK_ICE = {
@@ -79,12 +105,7 @@ FALLBACK_ICE = {
 
 @app.get("/ice-config")
 async def ice_config():
-    """
-    Fetches fresh TURN credentials from Metered.
-    Falls back to STUN-only if API key is not configured or request fails.
-    """
     api_key = os.getenv("METERED_API_KEY")
-
     if not api_key:
         return JSONResponse(FALLBACK_ICE)
 
@@ -97,9 +118,7 @@ async def ice_config():
                 params={"apiKey": api_key},
             )
             resp.raise_for_status()
-            ice_servers = resp.json()
-            return JSONResponse({"iceServers": ice_servers})
-
+            return JSONResponse({"iceServers": resp.json()})
     except Exception as e:
         print(f"[ice-config] Metered fetch failed: {e}, falling back to STUN")
         return JSONResponse(FALLBACK_ICE)
@@ -121,6 +140,9 @@ async def create_session():
 
 @app.get("/session/{session_id}")
 async def check_session(session_id: str):
+    # Reject anything that isn't 8 hex chars — no traversal, no injection
+    if not _valid_session_id(session_id):
+        return JSONResponse({"valid": False})
     session = sm.get_session(session_id)
     if session is None:
         return JSONResponse({"valid": False})
@@ -133,6 +155,11 @@ async def check_session(session_id: str):
 
 @app.websocket("/ws/{session_id}/{role}")
 async def websocket_endpoint(ws: WebSocket, session_id: str, role: str):
+    # Validate session_id format before touching any state
+    if not _valid_session_id(session_id):
+        await ws.accept()
+        await ws.close(code=4400)
+        return
     await handle_websocket(ws, session_id, role)
 
 

@@ -1,6 +1,7 @@
 import json
+import time
 from fastapi import WebSocket, WebSocketDisconnect
-from backend import session_manager as sm
+import session_manager as sm
 
 
 # ---------------------------------------------------------------------------
@@ -11,17 +12,32 @@ RELAY_TYPES = {"offer", "answer", "ice", "ready", "done"}
 
 
 # ---------------------------------------------------------------------------
+# Logging helper — single format for all Render logs
+# ---------------------------------------------------------------------------
+
+def _log(session_id: str, event: str, detail: str = "") -> None:
+    """
+    Structured log line visible in Render's log dashboard.
+    Format:  [qrlb] session=a3f9c1b2  event=...  detail=...
+    """
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    line = f"[qrlb] {ts} UTC  session={session_id}  event={event}"
+    if detail:
+        line += f"  {detail}"
+    print(line, flush=True)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 async def _send(ws: WebSocket, payload: dict) -> None:
-    """Send JSON to a single WebSocket. Silently ignores if ws is None."""
     if ws is None:
         return
     try:
         await ws.send_text(json.dumps(payload))
     except Exception:
-        pass  # client already disconnected
+        pass
 
 
 async def _send_error(ws: WebSocket, code: str, message: str) -> None:
@@ -29,15 +45,10 @@ async def _send_error(ws: WebSocket, code: str, message: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main handler  — one coroutine per WebSocket connection
+# Main handler
 # ---------------------------------------------------------------------------
 
 async def handle_websocket(ws: WebSocket, session_id: str, role: str) -> None:
-    """
-    Entry point called by FastAPI route:
-        WS /ws/{session_id}/{role}
-    role must be "desktop" or "phone".
-    """
 
     # -- 1. Validate role
     if role not in ("desktop", "phone"):
@@ -66,12 +77,9 @@ async def handle_websocket(ws: WebSocket, session_id: str, role: str) -> None:
     sm.attach_websocket(session_id, role, ws)
     await _send(ws, {"type": "connected", "role": role, "session_id": session_id})
 
+    _log(session_id, f"{role}_connected")
+
     # -- 5. Message loop
-    #
-    # We do NOT push peer_joined on connect.
-    # Both sides send {"type":"ready"} once their JS ws.onmessage is live.
-    # Only then do we fire peer_joined at phone — no race condition.
-    #
     try:
         while True:
             raw = await ws.receive_text()
@@ -97,29 +105,34 @@ async def handle_websocket(ws: WebSocket, session_id: str, role: str) -> None:
             phone_ws   = session["phone_ws"]
 
             if msg_type == "ready":
-                # If both sides present, trigger phone to start WebRTC offer.
-                # This can fire from either side sending ready — whoever is last.
                 if desktop_ws and phone_ws:
+                    _log(session_id, "both_connected", "starting WebRTC negotiation")
                     await _send(phone_ws, {"type": "peer_joined"})
                 else:
                     await _send(ws, {"type": "ack_ready"})
 
             elif msg_type == "offer":
-                # Phone -> Desktop
+                _log(session_id, "webrtc_offer_relayed")
                 await _send(desktop_ws, {"type": "offer", "sdp": msg.get("sdp")})
 
             elif msg_type == "answer":
-                # Desktop -> Phone
+                _log(session_id, "webrtc_answer_relayed")
                 await _send(phone_ws, {"type": "answer", "sdp": msg.get("sdp")})
 
             elif msg_type == "ice":
-                # Relay to the OTHER side
+                # ICE is high-frequency — don't log every candidate
                 if role == "desktop":
                     await _send(phone_ws,   {"type": "ice", "candidate": msg.get("candidate")})
                 else:
                     await _send(desktop_ws, {"type": "ice", "candidate": msg.get("candidate")})
 
             elif msg_type == "done":
+                # ── THE IMPORTANT LOG ──────────────────────────────────────
+                # Desktop sends "done" after successfully opening the link.
+                # This is the confirmation that the full flow completed.
+                _log(session_id, "LINK_DELIVERED",
+                     "phone->desktop transfer complete. session closing.")
+                # ──────────────────────────────────────────────────────────
                 sm.set_state(session_id, sm.State.DONE)
                 await _send(desktop_ws, {"type": "done"})
                 await _send(phone_ws,   {"type": "done"})
@@ -127,7 +140,7 @@ async def handle_websocket(ws: WebSocket, session_id: str, role: str) -> None:
                 break
 
     except WebSocketDisconnect:
-        pass
+        _log(session_id, f"{role}_disconnected", "WebSocket closed")
 
     finally:
         sm.detach_websocket(session_id, role)

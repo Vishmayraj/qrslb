@@ -9,6 +9,8 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: METERED_API_KEY
-        sync: false        # you paste this manually in Render dashboard
+        sync: false
       - key: METERED_DOMAIN
         value: qrslb.metered.live
+      - key: ALLOWED_ORIGIN
+        sync: https://qrslb.onrender.com
