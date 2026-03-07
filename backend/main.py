@@ -10,10 +10,10 @@ from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-import session_manager as sm
+from backend import session_manager as sm
 
 _start_time = time.time()  # recorded at boot
-from signaling import handle_websocket
+from backend.signaling import handle_websocket
 
 
 # ---------------------------------------------------------------------------
