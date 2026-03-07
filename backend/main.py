@@ -67,7 +67,7 @@ ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[ALLOWED_ORIGIN],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "HEAD"],
     allow_headers=["*"],
 )
 
@@ -170,7 +170,7 @@ async def websocket_endpoint(ws: WebSocket, session_id: str, role: str):
 # Health check — Render pings this
 # ---------------------------------------------------------------------------
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     now = time.time()
     sessions = list(sm._sessions.values())
