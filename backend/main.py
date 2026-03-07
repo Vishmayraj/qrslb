@@ -7,8 +7,8 @@ import httpx
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
-import session_manager as sm
-from signaling import handle_websocket
+from backend import session_manager as sm
+from backend.signaling import handle_websocket
 
 
 # ---------------------------------------------------------------------------
