@@ -289,9 +289,14 @@
   <!-- success view -->
   <div class="success" id="success-view">
     <div class="checkmark">✓</div>
-    <h2>Link opened.</h2>
+    <h2>Link received.</h2>
     <p id="opened-url" style="word-break:break-all;max-width:280px;color:#888"></p>
-    <button class="reset-btn" onclick="resetSession()">New session ↗</button>
+    <button class="reset-btn" id="open-btn" onclick="openReceivedLink()" style="background:var(--accent);color:var(--bg);border-color:var(--accent)">
+      Open link ↗
+    </button>
+    <button class="reset-btn" onclick="resetSession()" style="margin-top:0">
+      New session
+    </button>
   </div>
 
 </div>
@@ -359,8 +364,15 @@ function showQR(url) {
   });
 }
 
+let receivedUrl = null;
+
+function openReceivedLink() {
+  if (receivedUrl) window.open(receivedUrl, '_blank');
+}
+
 function showSuccess(url) {
-  document.getElementById('qr-view').style.display    = 'none';
+  receivedUrl = url;
+  document.getElementById('qr-view').style.display = 'none';
   const sv = document.getElementById('success-view');
   sv.classList.add('show');
   document.getElementById('opened-url').textContent = url;
@@ -389,8 +401,8 @@ function createPeerConnection() {
         if (msg.type === 'link' && /^https?:\/\//i.test(msg.url)) {
           dc.send(JSON.stringify({ type: 'ack' }));
           wsSend({ type: 'done' });
-          window.open(msg.url, '_blank');
-          showSuccess(msg.url);
+          window.open(msg.url, '_blank');  // works if browser allows it
+          showSuccess(msg.url);            // button shown as fallback either way
         }
       } catch (_) {}
     };
