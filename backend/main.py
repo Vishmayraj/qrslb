@@ -1,10 +1,10 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 import session_manager as sm
 from signaling import handle_websocket
@@ -24,10 +24,8 @@ async def _cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start cleanup loop when app boots
     task = asyncio.create_task(_cleanup_loop())
     yield
-    # Cancel cleanup loop when app shuts down
     task.cancel()
 
 
@@ -47,18 +45,13 @@ app = FastAPI(
 # Serve frontend files
 # ---------------------------------------------------------------------------
 
-BASE_DIR = Path(__file__).parent.parent  # project root
-
-# Serve desktop page at  /
-# Serve phone page at    /phone/
-
+BASE_DIR     = Path(__file__).parent.parent
 DESKTOP_HTML = BASE_DIR / "frontend" / "desktop" / "index.html"
 PHONE_HTML   = BASE_DIR / "frontend" / "phone"   / "index.html"
 
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_desktop():
-    """Desktop page — shows QR code."""
     if not DESKTOP_HTML.exists():
         raise HTTPException(status_code=404, detail="Desktop frontend not found")
     return HTMLResponse(content=DESKTOP_HTML.read_text())
@@ -66,52 +59,58 @@ async def serve_desktop():
 
 @app.get("/phone", response_class=HTMLResponse)
 async def serve_phone():
-    """
-    Phone page — paste and send link.
-    This URL is what the QR code points to (with session_id as query param).
-    e.g. https://yourapp.onrender.com/phone?session=abc12345
-    """
     if not PHONE_HTML.exists():
         raise HTTPException(status_code=404, detail="Phone frontend not found")
     return HTMLResponse(content=PHONE_HTML.read_text())
 
 
 # ---------------------------------------------------------------------------
-# REST  —  Session management
+# ICE config endpoint — frontend fetches this to get STUN + TURN servers
+# Credentials stay in env vars, never in HTML files
+# ---------------------------------------------------------------------------
+
+@app.get("/ice-config")
+async def ice_config():
+    """
+    Returns WebRTC ICE server config.
+    Falls back to STUN-only if TURN env vars are not set.
+    """
+    ice_servers = [
+        {"urls": "stun:stun.l.google.com:19302"},
+        {"urls": "stun:stun1.l.google.com:19302"},
+    ]
+    
+    # No need of .env cuz it stays in render :)
+    turn_url        = os.getenv("TURN_URL")
+    turn_username   = os.getenv("TURN_USERNAME")
+    turn_credential = os.getenv("TURN_CREDENTIAL")
+
+    if turn_url and turn_username and turn_credential:
+        ice_servers.append({
+            "urls":       turn_url,
+            "username":   turn_username,
+            "credential": turn_credential,
+        })
+
+    return JSONResponse({"iceServers": ice_servers})
+
+
+# ---------------------------------------------------------------------------
+# REST — Session management
 # ---------------------------------------------------------------------------
 
 @app.post("/session")
 async def create_session():
-    """
-    Desktop calls this on page load to get a fresh session.
-
-    Response:
-        {
-            "session_id": "a3f9c1b2",
-            "expires_in": 600,
-            "connect_url": "https://yourapp.onrender.com/phone?session=a3f9c1b2"
-        }
-    """
     session = sm.create_session()
     return JSONResponse({
         "session_id": session["id"],
         "expires_in": sm.SESSION_TTL_SECONDS,
-        # Frontend will embed this URL into the QR code
         "qr_payload": f"/phone?session={session['id']}",
     })
 
 
 @app.get("/session/{session_id}")
 async def check_session(session_id: str):
-    """
-    Phone calls this immediately after QR scan to verify session is still valid.
-
-    Response (valid):
-        { "valid": true, "state": "waiting" }
-
-    Response (invalid / expired):
-        { "valid": false }
-    """
     session = sm.get_session(session_id)
     if session is None:
         return JSONResponse({"valid": False})
@@ -119,24 +118,16 @@ async def check_session(session_id: str):
 
 
 # ---------------------------------------------------------------------------
-# WebSocket  —  Signaling
+# WebSocket — Signaling
 # ---------------------------------------------------------------------------
 
 @app.websocket("/ws/{session_id}/{role}")
 async def websocket_endpoint(ws: WebSocket, session_id: str, role: str):
-    """
-    Both desktop and phone connect here.
-
-    Desktop: /ws/{session_id}/desktop
-    Phone:   /ws/{session_id}/phone
-
-    All signaling logic lives in signaling.py — this just hands off.
-    """
     await handle_websocket(ws, session_id, role)
 
 
 # ---------------------------------------------------------------------------
-# Health check  —  Render uses this to confirm app is alive
+# Health check — Render pings this
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
