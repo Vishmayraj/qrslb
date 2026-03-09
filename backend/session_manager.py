@@ -24,7 +24,6 @@ class State:
 
 # ---------------------------------------------------------------------------
 # In-memory store  { session_id: session_dict }
-# We access and create the sessions using session_id as key.
 # ---------------------------------------------------------------------------
 
 _sessions: dict[str, dict] = {}
@@ -45,8 +44,8 @@ def create_session() -> dict:
         "state":      State.CREATED,
         "created_at": time.time(),
         "expires_at": time.time() + SESSION_TTL_SECONDS,
-        "desktop_ws": None,                    # WebSocket object
-        "phone_ws":   None,                    # WebSocket object
+        "desktop_ws": None,                    # WebSocket object (set later)
+        "phone_ws":   None,                    # WebSocket object (set later)
     }
     _sessions[session_id] = session
     return session
@@ -68,10 +67,12 @@ def get_session(session_id: str) -> Optional[dict]:
     return session
 
 
-# I believe we should reuse the get_session function! -- In progress
 def set_state(session_id: str, state: str) -> None:
-    """Advance the session to a new state."""
-    session = _sessions.get(session_id)
+    """
+    Advance the session to a new state.
+    Uses get_session() so expired sessions are never mutated.
+    """
+    session = get_session(session_id)
     if session:
         session["state"] = state
 
@@ -113,7 +114,7 @@ def destroy_session(session_id: str) -> None:
 def cleanup_expired() -> int:
     """
     Remove all expired sessions from memory.
-    We can call this periodically (e.g. every 60s via a background task).
+    Call this periodically (e.g. every 60s via a background task).
     Returns the number of sessions removed.
     """
     now = time.time()
