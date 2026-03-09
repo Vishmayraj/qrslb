@@ -1,4 +1,4 @@
-# QRSLB — QR WebRTC Link Launcher
+# QRSLB — QR (Secure Link Bridge) WebRTC Link Launcher
 
 **Scan a QR on your phone → link is automatically pasted and opened on the desktop.**  
 A tiny, lightweight web app designed to solve one specific problem: sending links to foreign or temporary computers **securely, instantly, and without juggling apps**.
