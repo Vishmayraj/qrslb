@@ -1,5 +1,3 @@
-<!-- CURR_DIR = frontend/phone/index.html -->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -527,12 +525,6 @@ function connectWS() {
 
   ws.onerror = () => {
     showError('Connection failed', 'Could not reach the server. Please try again.');
-  };
-
-  ws.onclose = () => {
-    if (!document.getElementById('success-view').classList.contains('show')) {
-      // Only show if not already success
-    }
   };
 }
 

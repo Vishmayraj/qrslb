@@ -13,4 +13,4 @@ services:
       - key: METERED_DOMAIN
         value: qrslb.metered.live
       - key: ALLOWED_ORIGIN
-        sync: https://qrslb.onrender.com
+        value: https://qrslb.onrender.com
